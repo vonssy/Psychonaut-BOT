@@ -306,17 +306,32 @@ class Psychonaut:
         return None
     
     async def wallet_nonce(self, address: str, proxy_url=None, retries=5):
-        url = f"{self.BASE_API}/auth/wallet/nonce?address={address}&chainType=ethereum"
+        url = f"{self.BASE_API}/auth/wallet/nonce"
+        params = {"address": address, "chainType": "ethereum"}
+        headers = { **self.HEADERS[address] }
         for attempt in range(retries):
             connector, proxy, proxy_auth = self.build_proxy_config(proxy_url)
             try:
                 async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
-                    async with session.get(url=url, headers=self.HEADERS[address], proxy=proxy, proxy_auth=proxy_auth) as response:
+                    async with session.get(url=url, headers=headers, params=params, proxy=proxy, proxy_auth=proxy_auth) as response:
+                        if response.status == 400:
+                            result = await response.json()
+                            err_msg = result.get("msg")
+
+                            self.log(
+                                f"{Fore.CYAN+Style.BRIGHT}Status  :{Style.RESET_ALL}"
+                                f"{Fore.RED+Style.BRIGHT} Fetch Nonce Failed {Style.RESET_ALL}"
+                                f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
+                                f"{Fore.YELLOW+Style.BRIGHT} {err_msg} {Style.RESET_ALL}"
+                            )
+                            return None
+                        
                         response.raise_for_status()
                         result = await response.json()
                         if "code" in result and result["code"] != 0:
-                            await asyncio.sleep(5)
-                            continue
+                            if attempt < retries - 1:
+                                await asyncio.sleep(5)
+                                continue
                         return result
             except (Exception, ClientResponseError) as e:
                 if attempt < retries - 1:
@@ -344,11 +359,24 @@ class Psychonaut:
             try:
                 async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
                     async with session.post(url=url, headers=headers, data=data, proxy=proxy, proxy_auth=proxy_auth) as response:
+                        if response.status == 400:
+                            result = await response.json()
+                            err_msg = result.get("msg")
+
+                            self.log(
+                                f"{Fore.CYAN+Style.BRIGHT}Status  :{Style.RESET_ALL}"
+                                f"{Fore.RED+Style.BRIGHT} Fetch Nonce Failed {Style.RESET_ALL}"
+                                f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
+                                f"{Fore.YELLOW+Style.BRIGHT} {err_msg} {Style.RESET_ALL}"
+                            )
+                            return None
+                        
                         response.raise_for_status()
                         result = await response.json()
                         if "code" in result and result["code"] != 0:
-                            await asyncio.sleep(5)
-                            continue
+                            if attempt < retries - 1:
+                                await asyncio.sleep(5)
+                                continue
                         return result
             except (Exception, ClientResponseError) as e:
                 if attempt < retries - 1:
@@ -381,8 +409,9 @@ class Psychonaut:
                         response.raise_for_status()
                         result = await response.json()
                         if "code" in result and result["code"] != 0:
-                            await asyncio.sleep(5)
-                            continue
+                            if attempt < retries - 1:
+                                await asyncio.sleep(5)
+                                continue
                         return result
             except (Exception, ClientResponseError) as e:
                 if attempt < retries - 1:
@@ -411,8 +440,9 @@ class Psychonaut:
                         response.raise_for_status()
                         result = await response.json()
                         if "code" in result and result["code"] != 0:
-                            await asyncio.sleep(5)
-                            continue
+                            if attempt < retries - 1:
+                                await asyncio.sleep(5)
+                                continue
                         return result
             except (Exception, ClientResponseError) as e:
                 if attempt < retries - 1:
@@ -441,8 +471,9 @@ class Psychonaut:
                         response.raise_for_status()
                         result = await response.json()
                         if "code" in result and result["code"] != 0:
-                            await asyncio.sleep(5)
-                            continue
+                            if attempt < retries - 1:
+                                await asyncio.sleep(5)
+                                continue
                         return result
             except (Exception, ClientResponseError) as e:
                 if attempt < retries - 1:
@@ -472,8 +503,9 @@ class Psychonaut:
                         response.raise_for_status()
                         result = await response.json()
                         if "code" in result and result["code"] != 0:
-                            await asyncio.sleep(5)
-                            continue
+                            if attempt < retries - 1:
+                                await asyncio.sleep(5)
+                                continue
                         return result
             except (Exception, ClientResponseError) as e:
                 if attempt < retries - 1:
