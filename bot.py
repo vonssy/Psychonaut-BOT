@@ -365,7 +365,7 @@ class Psychonaut:
 
                             self.log(
                                 f"{Fore.CYAN+Style.BRIGHT}Status  :{Style.RESET_ALL}"
-                                f"{Fore.RED+Style.BRIGHT} Fetch Nonce Failed {Style.RESET_ALL}"
+                                f"{Fore.RED+Style.BRIGHT} Login Failed {Style.RESET_ALL}"
                                 f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
                                 f"{Fore.YELLOW+Style.BRIGHT} {err_msg} {Style.RESET_ALL}"
                             )
