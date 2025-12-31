@@ -18,16 +18,17 @@ wib = pytz.timezone('Asia/Jakarta')
 class Psychonaut:
     def __init__(self) -> None:
         self.BASE_API = "https://member-api.psy.xyz"
-        self.REF_CODE = "FD02E176" # U can change it with yours
         self.PAGE_URL = "https://psy.xyz/"
+        self.CAPTCHA_URL = "https://api.2captcha.com"
         self.SITE_KEY = "0x4AAAAAAB4Dnwf7VH4TyqYB"
+        self.REF_CODE = "FD02E176" # U can change it with yours
         self.CAPTCHA_KEY = None
         self.HEADERS = {}
         self.proxies = []
         self.proxy_index = 0
         self.account_proxies = {}
         self.access_tokens = {}
-
+        
     def clear_terminal(self):
         os.system('cls' if os.name == 'nt' else 'clear')
 
@@ -53,16 +54,27 @@ class Psychonaut:
         minutes, seconds = divmod(remainder, 60)
         return f"{int(hours):02}:{int(minutes):02}:{int(seconds):02}"
     
-    def load_2captcha_key(self):
+    def load_accounts(self):
+        filename = "accounts.txt"
         try:
-            with open("2captcha_key.txt", 'r') as file:
-                captcha_key = file.read().strip()
-
-            return captcha_key
-        except Exception as e:
+            with open(filename, 'r') as file:
+                accounts = [line.strip() for line in file if line.strip()]
+            return accounts
+        except FileNotFoundError:
+            self.log(f"{Fore.RED}File {filename} Not Found.{Style.RESET_ALL}")
             return None
         
-    async def load_proxies(self):
+    def load_captcha_key(self):
+        filename = "captcha_key.txt"
+        try:
+            with open(filename, 'r') as file:
+                captcha_key = file.readline().strip()
+            return captcha_key
+        except FileNotFoundError:
+            self.log(f"{Fore.RED}File {filename} Not Found.{Style.RESET_ALL}")
+            return None
+        
+    def load_proxies(self):
         filename = "proxy.txt"
         try:
             if not os.path.exists(filename):
@@ -154,7 +166,7 @@ class Psychonaut:
             }
         except Exception as e:
             raise Exception(f"Generate Req Payload Failed: {str(e)}")
-
+        
     def mask_account(self, account):
         try:
             mask_account = account[:6] + '*' * 6 + account[-6:]
@@ -206,7 +218,7 @@ class Psychonaut:
                         )
                         return None
 
-                    url = "https://api.2captcha.com/createTask"
+                    url = f"{self.CAPTCHA_URL}/createTask"
                     data = json.dumps({
                         "clientKey": self.CAPTCHA_KEY,
                         "task": {
@@ -237,7 +249,7 @@ class Psychonaut:
                         )
 
                         for _ in range(30):
-                            res_url = "https://api.2captcha.com/getTaskResult"
+                            res_url = f"{self.CAPTCHA_URL}/getTaskResult"
                             res_data = json.dumps({
                                 "clientKey": self.CAPTCHA_KEY,
                                 "taskId": task_id
@@ -516,6 +528,7 @@ class Psychonaut:
 
             self.log(f"{Fore.CYAN+Style.BRIGHT}Captcha :{Style.RESET_ALL}")
 
+
             turnstile_token = await self.solve_turnstile(self.PAGE_URL, self.SITE_KEY)
             if not turnstile_token: return False
 
@@ -619,18 +632,16 @@ class Psychonaut:
 
     async def main(self):
         try:
-            with open('accounts.txt', 'r') as file:
-                accounts = [line.strip() for line in file if line.strip()]
+            accounts = self.load_accounts()
+            if not accounts:
+                self.log(f"{Fore.RED+Style.BRIGHT}No Accounts Loaded.{Style.RESET_ALL}")
+                return
+            
+            self.CAPTCHA_KEY = self.load_captcha_key()
 
             proxy_choice, rotate_proxy = self.print_question()
 
-            captcha_key = self.load_2captcha_key()
-            if captcha_key:
-                self.CAPTCHA_KEY = captcha_key
-
             while True:
-                use_proxy = True if proxy_choice == 1 else False
-
                 self.clear_terminal()
                 self.welcome()
                 self.log(
@@ -638,15 +649,17 @@ class Psychonaut:
                     f"{Fore.WHITE + Style.BRIGHT}{len(accounts)}{Style.RESET_ALL}"
                 )
 
-                if use_proxy:
-                    await self.load_proxies()
+                use_proxy = True if proxy_choice == 1 else False
+                if use_proxy: self.load_proxies()
 
                 separator = "=" * 25
-                for account in accounts:
+                for idx, account in enumerate(accounts, start=1):
                     if account:
                         address = self.generate_address(account)
                         self.log(
                             f"{Fore.CYAN + Style.BRIGHT}{separator}[{Style.RESET_ALL}"
+                            f"{Fore.WHITE + Style.BRIGHT} {idx} {Style.RESET_ALL}"
+                            f"{Fore.CYAN + Style.BRIGHT}-{Style.RESET_ALL}"
                             f"{Fore.WHITE + Style.BRIGHT} {self.mask_account(address)} {Style.RESET_ALL}"
                             f"{Fore.CYAN + Style.BRIGHT}]{separator}{Style.RESET_ALL}"
                         )
@@ -688,9 +701,6 @@ class Psychonaut:
                     await asyncio.sleep(1)
                     delay -= 1
 
-        except FileNotFoundError:
-            self.log(f"{Fore.RED}File 'accounts.txt' Not Found.{Style.RESET_ALL}")
-            return
         except Exception as e:
             self.log(f"{Fore.RED+Style.BRIGHT}Error: {e}{Style.RESET_ALL}")
             raise e
