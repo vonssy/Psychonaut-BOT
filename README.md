@@ -1,6 +1,6 @@
 # 🚀 Psychonaut BOT
 
-> Automated daily check-in solution for efficient crypto farming and multi-account management
+> Automated claim daily check-in and multi-account management
 
 [![Python Version](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -20,27 +20,26 @@
 
 ## 🎯 Overview
 
-Psychonaut BOT is an automated tool designed to claim daily check-in operations across multiple accounts. It provides seamless integration and offers robust proxy support for enhanced security and reliability.
+Psychonaut BOT is an automated tool designed to claim daily check-in across multiple accounts. It provides seamless offers robust proxy support for enhanced security and reliability.
 
 **🔗 Get Started:** [Register on Psychonaut](https://psy.xyz/psychonaut?icode=FD02E176)
 **🎁 Use My Code:** `FD02E176`
 
-> **Important:** Connect new evm wallet.
+> **Important:** Sign-Up with new evm wallet and connect your social account.
 
 ## ✨ Features
 
 - 🔄 **Automated Account Management** - Retrieve account information automatically
 - 🌐 **Flexible Proxy Support** - Run with or without proxy configuration
 - 🔀 **Smart Proxy Rotation** - Automatic rotation of invalid proxies
-- ⏰ **Daily Check-In** - Automated daily check-in
+- ⏰ **Daily Check-In** - Automated claim daily check-in
 - 👥 **Multi-Account Support** - Manage multiple accounts simultaneously
 
 ## 📋 Requirements
 
 - **Python:** Version 3.9 or higher
 - **pip:** Latest version recommended
-- **Compatible libraries:** eth-account and eth-utils (see requirements.txt)
-- **2captcha Key:** For automated captcha turnstile solving
+- **2Captcha Key:** For trunstile solver
 
 ## 🛠 Installation
 
@@ -80,14 +79,6 @@ pip install library_name==version
 
 ## ⚙️ Configuration
 
-### 2captcha Key Setup
-
-Create or edit `captcha_key.txt` in the project directory:
-
-```
-your_2captcha_key
-```
-
 ### Account Setup
 
 Create or edit `accounts.txt` in the project directory:
@@ -96,6 +87,12 @@ Create or edit `accounts.txt` in the project directory:
 your_private_key_1
 your_private_key_2
 your_private_key_3
+```
+
+Create or edit `captcha_key.txt` in the project directory:
+
+```
+your_2captcha_key_1
 ```
 
 ### Proxy Configuration (Optional)

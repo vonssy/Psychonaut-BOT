@@ -5,36 +5,52 @@ from aiohttp import (
     BasicAuth
 )
 from aiohttp_socks import ProxyConnector
-from fake_useragent import FakeUserAgent
 from eth_account import Account
 from eth_account.messages import encode_defunct
 from eth_utils import to_hex
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from colorama import *
-import asyncio, json, re, os, pytz
-
-wib = pytz.timezone('Asia/Jakarta')
+import asyncio, random, json, sys, re, os
 
 class Psychonaut:
     def __init__(self) -> None:
         self.BASE_API = "https://member-api.psy.xyz"
-        self.PAGE_URL = "https://psy.xyz/"
-        self.CAPTCHA_URL = "https://api.2captcha.com"
-        self.SITE_KEY = "0x4AAAAAAB4Dnwf7VH4TyqYB"
+        self.CAPTCHA = {
+            "page_url": "https://psy.xyz/",
+            "solver_api": "https://api.2captcha.com",
+            "site_key": "0x4AAAAAAB4Dnwf7VH4TyqYB",
+            "captcha_key": None
+        }
+
         self.REF_CODE = "FD02E176" # U can change it with yours
-        self.CAPTCHA_KEY = None
-        self.HEADERS = {}
+        
+        self.USE_PROXY = False
+        self.ROTATE_PROXY = False
+
         self.proxies = []
         self.proxy_index = 0
         self.account_proxies = {}
-        self.access_tokens = {}
+        self.accounts = {}
+
+        self.USER_AGENTS = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36 Edg/129.0.0.0",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 OPR/117.0.0.0"
+        ]
         
     def clear_terminal(self):
         os.system('cls' if os.name == 'nt' else 'clear')
 
     def log(self, message):
         print(
-            f"{Fore.CYAN + Style.BRIGHT}[ {datetime.now().astimezone(wib).strftime('%x %X %Z')} ]{Style.RESET_ALL}"
+            f"{Fore.CYAN + Style.BRIGHT}[ {datetime.now().strftime('%x %X')} ]{Style.RESET_ALL}"
             f"{Fore.WHITE + Style.BRIGHT} | {Style.RESET_ALL}{message}",
             flush=True
         )
@@ -138,22 +154,32 @@ class Psychonaut:
                 return None, proxy, None
 
         raise Exception("Unsupported Proxy Type.")
+    
+    def display_proxy(self, proxy_url=None):
+        if not proxy_url: return "No Proxy"
+
+        proxy_url = re.sub(r"^(http|https|socks4|socks5)://", "", proxy_url)
+
+        if "@" in proxy_url:
+            proxy_url = proxy_url.split("@", 1)[1]
+
+        return proxy_url
         
-    def generate_address(self, account: str):
+    def generate_address(self, private_key: str):
         try:
-            account = Account.from_key(account)
+            account = Account.from_key(private_key)
             address = account.address
 
             return address
         except Exception as e:
             return None
     
-    def generate_payload(self, account: str, address: str, nonce: str, turnstile_token: str):
+    def generate_payload(self, private_key: str, address: str, nonce: str, turnstile_token: str):
         try:
             timestamp = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
             message = f"https://psy.xyz wants you to sign in with your Ethereum account:\n{address}\n\n\nURI: https://psy.xyz\nVersion: 1\nChain ID: 1\nNonce: {nonce}\nIssued At: {timestamp}"
             encoded_message = encode_defunct(text=message)
-            signed_message = Account.sign_message(encoded_message, private_key=account)
+            signed_message = Account.sign_message(encoded_message, private_key=private_key)
             signature = to_hex(signed_message.signature)
 
             return {
@@ -174,6 +200,32 @@ class Psychonaut:
         except Exception as e:
             return None
 
+    def initialize_headers(self, address: str):
+        headers = {
+            "Accept": "*/*",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Cache-Control": "no-cache",
+            "Origin": "https://psy.xyz",
+            "Pragma": "no-cache",
+            "Referer": "https://psy.xyz/",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-site",
+            "User-Agent": self.accounts[address]["user_agent"]
+        }
+
+        return headers.copy()
+    
+    def get_next_run_time(self, anchor_minute=1):
+        now = datetime.now(timezone.utc)
+        today_target = now.replace(hour=0, minute=anchor_minute, second=0, microsecond=0)
+
+        if today_target > now:
+            return today_target
+        else:
+            return today_target + timedelta(days=1)
+
     def print_question(self):
         while True:
             try:
@@ -187,48 +239,67 @@ class Psychonaut:
                         "Without"
                     )
                     print(f"{Fore.GREEN + Style.BRIGHT}Run {proxy_type} Proxy Selected.{Style.RESET_ALL}")
+                    self.USE_PROXY = True if proxy_choice == 1 else False
                     break
                 else:
-                    print(f"{Fore.RED + Style.BRIGHT}Please enter either 1 or 2.{Style.RESET_ALL}")
+                    print(f"{Fore.RED + Style.BRIGHT}Please enter either 1  or 2.{Style.RESET_ALL}")
             except ValueError:
-                print(f"{Fore.RED + Style.BRIGHT}Invalid input. Enter a number (1 or 2).{Style.RESET_ALL}")
+                print(f"{Fore.RED + Style.BRIGHT}Invalid input. Enter a number (1  or 2).{Style.RESET_ALL}")
 
-        rotate_proxy = False
-        if proxy_choice == 1:
+        if self.USE_PROXY:
             while True:
                 rotate_proxy = input(f"{Fore.BLUE + Style.BRIGHT}Rotate Invalid Proxy? [y/n] -> {Style.RESET_ALL}").strip()
-
                 if rotate_proxy in ["y", "n"]:
-                    rotate_proxy = rotate_proxy == "y"
+                    self.ROTATE_PROXY = True if rotate_proxy == "y" else False
                     break
                 else:
                     print(f"{Fore.RED + Style.BRIGHT}Invalid input. Enter 'y' or 'n'.{Style.RESET_ALL}")
 
-        return proxy_choice, rotate_proxy
+    async def ensure_ok(self, response):
+        if response.status >= 400:
+            raise Exception(f"HTTP: {response.status}:{await response.text()}")
+
+    async def check_connection(self, proxy_url=None):
+        url = "https://api.ipify.org?format=json"
+        
+        connector, proxy, proxy_auth = self.build_proxy_config(proxy_url)
+        try:
+            async with ClientSession(connector=connector, timeout=ClientTimeout(total=15)) as session:
+                async with session.get(url=url, proxy=proxy, proxy_auth=proxy_auth) as response:
+                    await self.ensure_ok(response)
+                    return True
+        except (Exception, ClientResponseError) as e:
+            self.log(
+                f"{Fore.CYAN+Style.BRIGHT}Status  :{Style.RESET_ALL}"
+                f"{Fore.RED+Style.BRIGHT} Connection Not 200 OK {Style.RESET_ALL}"
+                f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
+                f"{Fore.YELLOW+Style.BRIGHT} {str(e)} {Style.RESET_ALL}"
+            )
+            return None
     
-    async def solve_turnstile(self, page_url: str, site_key: str, retries=5):
+    async def solve_turnstile(self, retries=5):
         for attempt in range(retries):
             try:
                 async with ClientSession(timeout=ClientTimeout(total=60)) as session:
                     
-                    if self.CAPTCHA_KEY is None:
+                    if self.CAPTCHA["captcha_key"] is None:
                         self.log(
                             f"{Fore.BLUE + Style.BRIGHT}   Status  : {Style.RESET_ALL}"
                             f"{Fore.YELLOW + Style.BRIGHT}Captcha Key Is None{Style.RESET_ALL}"
                         )
                         return None
 
-                    url = f"{self.CAPTCHA_URL}/createTask"
+                    url = f"{self.CAPTCHA['solver_api']}/createTask"
                     data = json.dumps({
-                        "clientKey": self.CAPTCHA_KEY,
+                        "clientKey": self.CAPTCHA["captcha_key"],
                         "task": {
                             "type": "TurnstileTaskProxyless",
-                            "websiteURL": page_url,
-                            "websiteKey": site_key
+                            "websiteURL": self.CAPTCHA["page_url"],
+                            "websiteKey": self.CAPTCHA["site_key"]
                         }
                     })
                     async with session.post(url=url, data=data) as response:
-                        response.raise_for_status()
+                        await self.ensure_ok(response)
                         result_text = await response.text()
                         result_json = json.loads(result_text)
 
@@ -249,13 +320,13 @@ class Psychonaut:
                         )
 
                         for _ in range(30):
-                            res_url = f"{self.CAPTCHA_URL}/getTaskResult"
+                            res_url = f"{self.CAPTCHA['solver_api']}/getTaskResult"
                             res_data = json.dumps({
-                                "clientKey": self.CAPTCHA_KEY,
+                                "clientKey": self.CAPTCHA["captcha_key"],
                                 "taskId": task_id
                             })
                             async with session.post(url=res_url, data=res_data) as res_response:
-                                res_response.raise_for_status()
+                                await self.ensure_ok(res_response)
                                 res_result_text = await res_response.text()
                                 res_result_json = json.loads(res_result_text)
 
@@ -288,32 +359,22 @@ class Psychonaut:
                 )
                 return None
     
-    async def check_connection(self, proxy_url=None):
-        connector, proxy, proxy_auth = self.build_proxy_config(proxy_url)
-        try:
-            async with ClientSession(connector=connector, timeout=ClientTimeout(total=30)) as session:
-                async with session.get(url="https://api.ipify.org?format=json", proxy=proxy, proxy_auth=proxy_auth) as response:
-                    response.raise_for_status()
-                    return True
-        except (Exception, ClientResponseError) as e:
-            self.log(
-                f"{Fore.CYAN+Style.BRIGHT}Status  :{Style.RESET_ALL}"
-                f"{Fore.RED+Style.BRIGHT} Connection Not 200 OK {Style.RESET_ALL}"
-                f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
-                f"{Fore.YELLOW+Style.BRIGHT} {str(e)} {Style.RESET_ALL}"
-            )
-        
-        return None
-    
     async def wallet_nonce(self, address: str, proxy_url=None, retries=5):
         url = f"{self.BASE_API}/auth/wallet/nonce"
-        params = {"address": address, "chainType": "ethereum"}
-        headers = { **self.HEADERS[address] }
+        
         for attempt in range(retries):
             connector, proxy, proxy_auth = self.build_proxy_config(proxy_url)
             try:
+                headers = self.initialize_headers(address)
+                params = {
+                    "address": address, 
+                    "chainType": "ethereum"
+                }
+
                 async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
-                    async with session.get(url=url, headers=headers, params=params, proxy=proxy, proxy_auth=proxy_auth) as response:
+                    async with session.get(
+                        url=url, headers=headers, params=params, proxy=proxy, proxy_auth=proxy_auth
+                    ) as response:
                         if response.status == 400:
                             result = await response.json()
                             err_msg = result.get("msg")
@@ -326,7 +387,7 @@ class Psychonaut:
                             )
                             return None
                         
-                        response.raise_for_status()
+                        await self.ensure_ok(response)
                         result = await response.json()
                         if "code" in result and result["code"] != 0:
                             if attempt < retries - 1:
@@ -346,19 +407,20 @@ class Psychonaut:
 
         return None
     
-    async def wallet_login(self, account: str, address: str, nonce: str, turnstile_token: str, proxy_url=None, retries=5):
+    async def wallet_login(self, private_key: str, address: str, nonce: str, turnstile_token: str, proxy_url=None, retries=5):
         url = f"{self.BASE_API}/auth/wallet/login"
-        data = json.dumps(self.generate_payload(account, address, nonce, turnstile_token))
-        headers = {
-            **self.HEADERS[address],
-            "Content-Length": str(len(data)),
-            "Content-Type": "application/json"
-        }
+        
         for attempt in range(retries):
             connector, proxy, proxy_auth = self.build_proxy_config(proxy_url)
             try:
+                headers = self.initialize_headers(address)
+                headers["Content-Type"] = "application/json"
+                payload = self.generate_payload(private_key, address, nonce, turnstile_token)
+
                 async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
-                    async with session.post(url=url, headers=headers, data=data, proxy=proxy, proxy_auth=proxy_auth) as response:
+                    async with session.post(
+                        url=url, headers=headers, json=payload, proxy=proxy, proxy_auth=proxy_auth
+                    ) as response:
                         if response.status == 400:
                             result = await response.json()
                             err_msg = result.get("msg")
@@ -371,7 +433,7 @@ class Psychonaut:
                             )
                             return None
                         
-                        response.raise_for_status()
+                        await self.ensure_ok(response)
                         result = await response.json()
                         if "code" in result and result["code"] != 0:
                             if attempt < retries - 1:
@@ -393,20 +455,23 @@ class Psychonaut:
     
     async def user_invite(self, address: str, proxy_url=None, retries=5):
         url = f"{self.BASE_API}/users/me/invite-code"
-        data = json.dumps({"inviteCode": self.REF_CODE})
-        headers = {
-            **self.HEADERS[address],
-            "Authorization": f"Bearer {self.access_tokens[address]}",
-            "Content-Length": str(len(data)),
-            "Content-Type": "application/json"
-        }
+        
         for attempt in range(retries):
             connector, proxy, proxy_auth = self.build_proxy_config(proxy_url)
             try:
+                headers = self.initialize_headers(address)
+                headers["Authorization"] = f"Bearer {self.accounts[address]['token']}"
+                headers["Content-Type"] = "application/json"
+                payload = {
+                    "inviteCode": self.REF_CODE
+                }
+
                 async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
-                    async with session.put(url=url, headers=headers, data=data, proxy=proxy, proxy_auth=proxy_auth) as response:
+                    async with session.put(
+                        url=url, headers=headers, json=payload, proxy=proxy, proxy_auth=proxy_auth
+                    ) as response:
                         if response.status == 400: return None
-                        response.raise_for_status()
+                        await self.ensure_ok(response)
                         result = await response.json()
                         if "code" in result and result["code"] != 0:
                             if attempt < retries - 1:
@@ -428,16 +493,18 @@ class Psychonaut:
     
     async def user_me(self, address: str, proxy_url=None, retries=5):
         url = f"{self.BASE_API}/users/me"
-        headers = {
-            **self.HEADERS[address],
-            "Authorization": f"Bearer {self.access_tokens[address]}"
-        }
+        
         for attempt in range(retries):
             connector, proxy, proxy_auth = self.build_proxy_config(proxy_url)
             try:
+                headers = self.initialize_headers(address)
+                headers["Authorization"] = f"Bearer {self.accounts[address]['token']}"
+
                 async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
-                    async with session.get(url=url, headers=headers, proxy=proxy, proxy_auth=proxy_auth) as response:
-                        response.raise_for_status()
+                    async with session.get(
+                        url=url, headers=headers, proxy=proxy, proxy_auth=proxy_auth
+                    ) as response:
+                        await self.ensure_ok(response)
                         result = await response.json()
                         if "code" in result and result["code"] != 0:
                             if attempt < retries - 1:
@@ -458,17 +525,19 @@ class Psychonaut:
         return None
     
     async def task_lists(self, address: str, proxy_url=None, retries=5):
-        url = f"{self.BASE_API}/tasks?page=1&pageSize=9"
-        headers = {
-            **self.HEADERS[address],
-            "Authorization": f"Bearer {self.access_tokens[address]}"
-        }
+        url = f"{self.BASE_API}/tasks"
+        
         for attempt in range(retries):
             connector, proxy, proxy_auth = self.build_proxy_config(proxy_url)
             try:
+                headers = self.initialize_headers(address)
+                headers["Authorization"] = f"Bearer {self.accounts[address]['token']}"
+                
                 async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
-                    async with session.get(url=url, headers=headers, proxy=proxy, proxy_auth=proxy_auth) as response:
-                        response.raise_for_status()
+                    async with session.get(
+                        url=url, headers=headers, proxy=proxy, proxy_auth=proxy_auth
+                    ) as response:
+                        await self.ensure_ok(response)
                         result = await response.json()
                         if "code" in result and result["code"] != 0:
                             if attempt < retries - 1:
@@ -490,17 +559,18 @@ class Psychonaut:
     
     async def claim_checkin(self, address: str, proxy_url=None, retries=5):
         url = f"{self.BASE_API}/tasks/check-in"
-        headers = {
-            **self.HEADERS[address],
-            "Authorization": f"Bearer {self.access_tokens[address]}",
-            "Content-Length": "0"
-        }
+        
         for attempt in range(retries):
             connector, proxy, proxy_auth = self.build_proxy_config(proxy_url)
             try:
+                headers = self.initialize_headers(address)
+                headers["Authorization"] = f"Bearer {self.accounts[address]['token']}"
+
                 async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
-                    async with session.post(url=url, headers=headers, proxy=proxy, proxy_auth=proxy_auth) as response:
-                        response.raise_for_status()
+                    async with session.post(
+                        url=url, headers=headers, proxy=proxy, proxy_auth=proxy_auth
+                    ) as response:
+                        await self.ensure_ok(response)
                         result = await response.json()
                         if "code" in result and result["code"] != 0:
                             if attempt < retries - 1:
@@ -520,158 +590,161 @@ class Psychonaut:
 
         return None
     
-    async def process_check_connection(self, address: str, use_proxy: bool, rotate_proxy: bool):
+    async def process_check_connection(self, address: str, proxy_url=None):
         while True:
-            proxy = self.get_next_proxy_for_account(address) if use_proxy else None
+            if self.USE_PROXY:
+                proxy_url = self.get_next_proxy_for_account(address)
+
             self.log(
                 f"{Fore.CYAN+Style.BRIGHT}Proxy   :{Style.RESET_ALL}"
-                f"{Fore.WHITE+Style.BRIGHT} {proxy} {Style.RESET_ALL}"
+                f"{Fore.WHITE+Style.BRIGHT} {self.display_proxy(proxy_url)} {Style.RESET_ALL}"
             )
 
-            is_valid = await self.check_connection(proxy)
+            is_valid = await self.check_connection(proxy_url)
             if is_valid: return True
 
-            if rotate_proxy:
-                proxy = self.rotate_proxy_for_account(address)
+            if self.ROTATE_PROXY:
+                proxy_url = self.rotate_proxy_for_account(address)
                 await asyncio.sleep(1)
                 continue
 
             return False
-    
-    async def process_user_login(self, account: str, address: str, use_proxy: bool, rotate_proxy: bool):
-        is_valid = await self.process_check_connection(address, use_proxy, rotate_proxy)
-        if is_valid:
-            proxy = self.get_next_proxy_for_account(address) if use_proxy else None
+        
+    async def process_user_login(self, private_key: str, address: str, proxy_url=None):
+        is_valid = await self.process_check_connection(address, proxy_url)
+        if not is_valid: return False
 
-            wallet_nonce = await self.wallet_nonce(address, proxy)
-            if not wallet_nonce: return False
+        if self.USE_PROXY:
+            proxy_url = self.get_next_proxy_for_account(address)
 
-            message = wallet_nonce["msg"]
-            if message != "success":
-                self.log(
-                    f"{Fore.CYAN+Style.BRIGHT}Status  :{Style.RESET_ALL}"
-                    f"{Fore.RED+Style.BRIGHT} Fetch Nonce Failed {Style.RESET_ALL}"
-                    f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
-                    f"{Fore.YELLOW+Style.BRIGHT} {message} {Style.RESET_ALL}"
-                )
-                return False
-            
-            nonce = wallet_nonce["data"]["nonce"]
+        wallet_nonce = await self.wallet_nonce(address, proxy_url)
+        if not wallet_nonce: return False
 
-            self.log(f"{Fore.CYAN+Style.BRIGHT}Captcha :{Style.RESET_ALL}")
-
-
-            turnstile_token = await self.solve_turnstile(self.PAGE_URL, self.SITE_KEY)
-            if not turnstile_token: return False
-
-            wallet_login = await self.wallet_login(account, address, nonce, turnstile_token, proxy)
-            if not wallet_login: return False
-
-            message = wallet_login["msg"]
-            if message != "success":
-                self.log(
-                    f"{Fore.CYAN+Style.BRIGHT}Status  :{Style.RESET_ALL}"
-                    f"{Fore.RED+Style.BRIGHT} Login Failed {Style.RESET_ALL}"
-                    f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
-                    f"{Fore.YELLOW+Style.BRIGHT} {message} {Style.RESET_ALL}"
-                )
-                return False
-            
-            access_token = wallet_login["data"]["token"]
-
-            self.access_tokens[address] = access_token
-
+        message = wallet_nonce["msg"]
+        if message != "success":
             self.log(
-                f"{Fore.CYAN + Style.BRIGHT}Status  :{Style.RESET_ALL}"
-                f"{Fore.GREEN + Style.BRIGHT} Login Success {Style.RESET_ALL}"
+                f"{Fore.CYAN+Style.BRIGHT}Status  :{Style.RESET_ALL}"
+                f"{Fore.RED+Style.BRIGHT} Fetch Nonce Failed {Style.RESET_ALL}"
+                f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
+                f"{Fore.YELLOW+Style.BRIGHT} {message} {Style.RESET_ALL}"
             )
+            return False
+        
+        nonce = wallet_nonce["data"]["nonce"]
 
-            await self.user_invite(address, proxy)
+        self.log(f"{Fore.CYAN+Style.BRIGHT}Captcha :{Style.RESET_ALL}")
 
-            return True
+        turnstile_token = await self.solve_turnstile()
+        if not turnstile_token: return False
 
-    async def process_accounts(self, account: str, address: str, use_proxy: bool, rotate_proxy: bool):
-        logined = await self.process_user_login(account, address, use_proxy, rotate_proxy)
-        if logined:
-            proxy = self.get_next_proxy_for_account(address) if use_proxy else None
+        wallet_login = await self.wallet_login(private_key, address, nonce, turnstile_token, proxy_url)
+        if not wallet_login: return False
 
-            user = await self.user_me(address, proxy)
-            if user:
-                message = user["msg"]
+        message = wallet_login["msg"]
+        if message != "success":
+            self.log(
+                f"{Fore.CYAN+Style.BRIGHT}Status  :{Style.RESET_ALL}"
+                f"{Fore.RED+Style.BRIGHT} Login Failed {Style.RESET_ALL}"
+                f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
+                f"{Fore.YELLOW+Style.BRIGHT} {message} {Style.RESET_ALL}"
+            )
+            return False
 
-                if message != "success":
-                    self.log(
-                        f"{Fore.CYAN+Style.BRIGHT}Score   :{Style.RESET_ALL}"
-                        f"{Fore.RED+Style.BRIGHT} Fetch Psy Points Failed {Style.RESET_ALL}"
-                        f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
-                        f"{Fore.YELLOW+Style.BRIGHT} {message} {Style.RESET_ALL}"
-                    )
+        self.accounts[address]["token"] = wallet_login["data"]["token"]
 
-                else:
-                    score = user["data"]["score"]
-                    self.log(
-                        f"{Fore.CYAN + Style.BRIGHT}Score   :{Style.RESET_ALL}"
-                        f"{Fore.WHITE + Style.BRIGHT} {score} Psy Points {Style.RESET_ALL}"
-                    )
+        self.log(
+            f"{Fore.CYAN + Style.BRIGHT}Status  :{Style.RESET_ALL}"
+            f"{Fore.GREEN + Style.BRIGHT} Login Success {Style.RESET_ALL}"
+        )
 
-            task_lists = await self.task_lists(address, proxy)
-            if task_lists:
-                message = task_lists["msg"]
+        await self.user_invite(address, proxy_url)
 
-                if message != "success":
-                    self.log(
-                        f"{Fore.CYAN+Style.BRIGHT}Check-In:{Style.RESET_ALL}"
-                        f"{Fore.RED+Style.BRIGHT} Fetch Status Failed {Style.RESET_ALL}"
-                        f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
-                        f"{Fore.YELLOW+Style.BRIGHT} {message} {Style.RESET_ALL}"
-                    )
+        return True
+    
+    async def process_accounts(self, private_key: str, address: str, proxy_url=None):
+        logined = await self.process_user_login(private_key, address, proxy_url)
+        if not logined: return False
 
-                else:
-                    tasks = task_lists["data"]["list"]
+        if self.USE_PROXY:
+            proxy_url = self.get_next_proxy_for_account(address)
 
-                    for task in tasks:
-                        if task and task["title"] == "Daily Login":
-                            can_complete = task["completionStatus"]["canComplete"]
+        user = await self.user_me(address, proxy_url)
+        if user:
+            message = user["msg"]
 
-                            if can_complete:
-                                claim = await self.claim_checkin(address, proxy)
-                                if claim:
-                                    message = claim["msg"]
+            if message != "success":
+                self.log(
+                    f"{Fore.CYAN+Style.BRIGHT}Score   :{Style.RESET_ALL}"
+                    f"{Fore.RED+Style.BRIGHT} Fetch Psy Points Failed {Style.RESET_ALL}"
+                    f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
+                    f"{Fore.YELLOW+Style.BRIGHT} {message} {Style.RESET_ALL}"
+                )
 
-                                    if message != "success":
-                                        self.log(
-                                            f"{Fore.CYAN+Style.BRIGHT}Check-In:{Style.RESET_ALL}"
-                                            f"{Fore.RED+Style.BRIGHT} Not Claimed {Style.RESET_ALL}"
-                                            f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
-                                            f"{Fore.YELLOW+Style.BRIGHT} {message} {Style.RESET_ALL}"
-                                        )
+            else:
+                score = user["data"]["score"]
+                self.log(
+                    f"{Fore.CYAN + Style.BRIGHT}Score   :{Style.RESET_ALL}"
+                    f"{Fore.WHITE + Style.BRIGHT} {score} Psy Points {Style.RESET_ALL}"
+                )
 
-                                    else:
-                                        reward = claim["data"]["rewardScore"]
-                                        self.log(
-                                            f"{Fore.CYAN+Style.BRIGHT}Check-In:{Style.RESET_ALL}"
-                                            f"{Fore.GREEN+Style.BRIGHT} Claimed {Style.RESET_ALL}"
-                                            f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
-                                            f"{Fore.CYAN+Style.BRIGHT} Reward: {Style.RESET_ALL}"
-                                            f"{Fore.WHITE+Style.BRIGHT}{reward} Psy Points{Style.RESET_ALL}"
-                                        )
-                                        
-                            else:
-                                self.log(
-                                    f"{Fore.CYAN+Style.BRIGHT}Check-In:{Style.RESET_ALL}"
-                                    f"{Fore.YELLOW+Style.BRIGHT} Already Claimed Today {Style.RESET_ALL}"
-                                )
+        task_lists = await self.task_lists(address, proxy_url)
+        if task_lists:
+            message = task_lists["msg"]
+
+            if message != "success":
+                self.log(
+                    f"{Fore.CYAN+Style.BRIGHT}Check-In:{Style.RESET_ALL}"
+                    f"{Fore.RED+Style.BRIGHT} Fetch Status Failed {Style.RESET_ALL}"
+                    f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
+                    f"{Fore.YELLOW+Style.BRIGHT} {message} {Style.RESET_ALL}"
+                )
+
+            else:
+                tasks = task_lists["data"]["list"]
+
+                for task in tasks:
+                    if task and task["title"] == "Daily Login":
+                        can_complete = task["completionStatus"]["canComplete"]
+
+                        if can_complete:
+                            claim = await self.claim_checkin(address, proxy_url)
+                            if claim:
+                                message = claim["msg"]
+
+                                if message != "success":
+                                    self.log(
+                                        f"{Fore.CYAN+Style.BRIGHT}Check-In:{Style.RESET_ALL}"
+                                        f"{Fore.RED+Style.BRIGHT} Not Claimed {Style.RESET_ALL}"
+                                        f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
+                                        f"{Fore.YELLOW+Style.BRIGHT} {message} {Style.RESET_ALL}"
+                                    )
+
+                                else:
+                                    reward = claim["data"]["rewardScore"]
+                                    self.log(
+                                        f"{Fore.CYAN+Style.BRIGHT}Check-In:{Style.RESET_ALL}"
+                                        f"{Fore.GREEN+Style.BRIGHT} Claimed {Style.RESET_ALL}"
+                                        f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
+                                        f"{Fore.CYAN+Style.BRIGHT} Reward: {Style.RESET_ALL}"
+                                        f"{Fore.WHITE+Style.BRIGHT}{reward} Psy Points{Style.RESET_ALL}"
+                                    )
+                                    
+                        else:
+                            self.log(
+                                f"{Fore.CYAN+Style.BRIGHT}Check-In:{Style.RESET_ALL}"
+                                f"{Fore.YELLOW+Style.BRIGHT} Already Claimed Today {Style.RESET_ALL}"
+                            )
 
     async def main(self):
         try:
             accounts = self.load_accounts()
             if not accounts:
-                self.log(f"{Fore.RED+Style.BRIGHT}No Accounts Loaded.{Style.RESET_ALL}")
+                print(f"{Fore.RED+Style.BRIGHT}No Accounts Loaded.{Style.RESET_ALL}") 
                 return
             
-            self.CAPTCHA_KEY = self.load_captcha_key()
+            self.CAPTCHA["captcha_key"] = self.load_captcha_key()
 
-            proxy_choice, rotate_proxy = self.print_question()
+            self.print_question()
 
             while True:
                 self.clear_terminal()
@@ -681,57 +754,57 @@ class Psychonaut:
                     f"{Fore.WHITE + Style.BRIGHT}{len(accounts)}{Style.RESET_ALL}"
                 )
 
-                use_proxy = True if proxy_choice == 1 else False
-                if use_proxy: self.load_proxies()
+                if self.USE_PROXY: self.load_proxies()
 
                 separator = "=" * 25
-                for idx, account in enumerate(accounts, start=1):
-                    if account:
-                        address = self.generate_address(account)
-                        self.log(
-                            f"{Fore.CYAN + Style.BRIGHT}{separator}[{Style.RESET_ALL}"
-                            f"{Fore.WHITE + Style.BRIGHT} {idx} {Style.RESET_ALL}"
-                            f"{Fore.CYAN + Style.BRIGHT}-{Style.RESET_ALL}"
-                            f"{Fore.WHITE + Style.BRIGHT} {self.mask_account(address)} {Style.RESET_ALL}"
-                            f"{Fore.CYAN + Style.BRIGHT}]{separator}{Style.RESET_ALL}"
-                        )
+                for idx, private_key in enumerate(accounts, start=1):
+                    self.log(
+                        f"{Fore.CYAN + Style.BRIGHT}{separator}[{Style.RESET_ALL}"
+                        f"{Fore.WHITE + Style.BRIGHT} {idx} {Style.RESET_ALL}"
+                        f"{Fore.CYAN + Style.BRIGHT}-{Style.RESET_ALL}"
+                        f"{Fore.WHITE + Style.BRIGHT} {len(accounts)} {Style.RESET_ALL}"
+                        f"{Fore.CYAN + Style.BRIGHT}]{separator}{Style.RESET_ALL}"
+                    )
 
-                        if not address:
-                            self.log(
-                                f"{Fore.CYAN + Style.BRIGHT}Status  :{Style.RESET_ALL}"
-                                f"{Fore.RED + Style.BRIGHT} Invalid Private Key or Library Version Not Supported {Style.RESET_ALL}"
-                            )
-                            continue
+                    address = self.generate_address(private_key)
+                    if not address: continue
 
-                        self.HEADERS[address] = {
-                            "Accept": "*/*",
-                            "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
-                            "Origin": "https://psy.xyz",
-                            "Referer": "https://psy.xyz/",
-                            "Sec-Fetch-Dest": "empty",
-                            "Sec-Fetch-Mode": "cors",
-                            "Sec-Fetch-Site": "same-site",
-                            "User-Agent": FakeUserAgent().random
+                    if address not in self.accounts:
+                        self.accounts[address] = {
+                            "user_agent": random.choice(self.USER_AGENTS)
                         }
-                        
-                        await self.process_accounts(account, address, use_proxy, rotate_proxy)
 
-                self.log(f"{Fore.CYAN + Style.BRIGHT}={Style.RESET_ALL}"*72)
+                    self.log(
+                        f"{Fore.CYAN+Style.BRIGHT}Address :{Style.RESET_ALL}"
+                        f"{Fore.WHITE+Style.BRIGHT} {self.mask_account(address)} {Style.RESET_ALL}"
+                    )
+                        
+                    await self.process_accounts(private_key, address)
+                    await asyncio.sleep(random.uniform(2.0, 3.0))
+
+                self.log(f"{Fore.CYAN + Style.BRIGHT}={Style.RESET_ALL}"*60)
                 
-                delay = 24 * 60 * 60
-                while delay > 0:
-                    formatted_time = self.format_seconds(delay)
+                next_run = self.get_next_run_time(anchor_minute=1)
+
+                while True:
+                    now = datetime.now(timezone.utc)
+                    remaining = (next_run - now).total_seconds()
+
+                    if remaining <= 0:
+                        break
+
+                    formatted_time = self.format_seconds(remaining)
+
                     print(
                         f"{Fore.CYAN+Style.BRIGHT}[ Wait for{Style.RESET_ALL}"
                         f"{Fore.WHITE+Style.BRIGHT} {formatted_time} {Style.RESET_ALL}"
-                        f"{Fore.CYAN+Style.BRIGHT}... ]{Style.RESET_ALL}"
+                        f"{Fore.CYAN+Style.BRIGHT}]{Style.RESET_ALL}"
                         f"{Fore.WHITE+Style.BRIGHT} | {Style.RESET_ALL}"
                         f"{Fore.BLUE+Style.BRIGHT}All Accounts Have Been Processed...{Style.RESET_ALL}",
                         end="\r",
                         flush=True
                     )
                     await asyncio.sleep(1)
-                    delay -= 1
 
         except Exception as e:
             self.log(f"{Fore.RED+Style.BRIGHT}Error: {e}{Style.RESET_ALL}")
@@ -743,7 +816,8 @@ if __name__ == "__main__":
         asyncio.run(bot.main())
     except KeyboardInterrupt:
         print(
-            f"{Fore.CYAN + Style.BRIGHT}[ {datetime.now().astimezone(wib).strftime('%x %X %Z')} ]{Style.RESET_ALL}"
+            f"{Fore.CYAN + Style.BRIGHT}[ {datetime.now().strftime('%x %X')} ]{Style.RESET_ALL}"
             f"{Fore.WHITE + Style.BRIGHT} | {Style.RESET_ALL}"
             f"{Fore.RED + Style.BRIGHT}[ EXIT ] Psychonaut - BOT{Style.RESET_ALL}                                       "                              
         )
+        sys.exit(0)
